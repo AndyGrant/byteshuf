@@ -58,6 +58,10 @@ static FILE* open_file_in_directory(struct arguments *args, const char *fname) {
 
     char tempfile[512];
     sprintf(tempfile, "%s%s", args->directory, fname);
+
+    if (args->verbose)
+        printf("Opened %s\n", tempfile);
+
     return fopen(tempfile, "rb");
 }
 
@@ -102,10 +106,13 @@ static size_t process_input_file(struct arguments *args, FILE *fin, Data *data, 
         const size_t read_size = args->chunk_size - leftovers;
         entries_read = fread(&data[leftovers], sizeof(Data), read_size, fin);
 
+        if (args->verbose)
+            printf("Read %zu entries\n", entries_read);
+
         if (entries_read == read_size)
             shuffle_and_save(args, args->chunk_size, data, nfiles);
 
-        leftovers = (entries_read == read_size) ? 0 : entries_read;
+        leftovers = (entries_read == read_size) ? 0 : entries_read + leftovers;
 
     } while (!leftovers && entries_read);
 
