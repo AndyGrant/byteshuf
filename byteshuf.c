@@ -54,19 +54,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 }
 
 
-static bool is_directory(const char *fname) {
-    struct stat path_stat;
-    stat(fname, &path_stat);
-    return S_ISDIR(path_stat.st_mode);
-}
-
 static FILE* open_file_in_directory(struct arguments *args, const char *fname) {
 
     char tempfile[512];
     sprintf(tempfile, "%s%s", args->directory, fname);
     return fopen(tempfile, "rb");
 }
-
 
 static uint64_t rand64() {
 
@@ -76,6 +69,7 @@ static uint64_t rand64() {
     seed ^= seed >> 12; seed ^= seed << 25; seed ^= seed >> 27;
     return seed * 2685821657736338717ull;
 }
+
 
 static void swap_data(Data *data, int x, int y) {
     Data temp = data[x]; data[x] = data[y]; data[y] = temp;
@@ -140,10 +134,8 @@ static size_t read_all_input_files(struct arguments *args, int *nfiles) {
 
             FILE *fin = open_file_in_directory(args, dirent->d_name);
 
-            if (args->read_header) {
-                uint8_t header[args->read_header];
-                size_t entries_read = fread(header, sizeof(uint8_t), args->read_header, fin);
-            }
+            if (args->read_header)
+                fseek(fin, args->read_header, SEEK_CUR);
 
             leftovers = process_input_file(args, fin, data, leftovers, nfiles);
             fclose(fin);
@@ -156,10 +148,8 @@ static size_t read_all_input_files(struct arguments *args, int *nfiles) {
 
         FILE *fin = fopen(args->input, "rb");
 
-        if (args->read_header) {
-            uint8_t header[args->read_header];
-            size_t entries_read = fread(header, sizeof(uint8_t), args->read_header, fin);
-        }
+        if (args->read_header)
+            fseek(fin, args->read_header, SEEK_CUR);
 
         leftovers = process_input_file(args, fin, data, leftovers, nfiles);
         fclose(fin);
@@ -252,8 +242,22 @@ static void output_from_partials(struct arguments *args, FILE **partials, size_t
 
 int main(int argc, char *argv[]) {
 
-    struct argp argp = { options, parse_opt, "", "" };
-    struct arguments arguments = { false, 134217728, 134217728, 0, 0, NULL, NULL, NULL };
+    struct argp argp = {
+        .options = options,
+        .parser  = parse_opt,
+    };
+
+    struct arguments arguments = {
+        .verbose      = false,
+        .per_file     = 134217728,
+        .chunk_size   = 134217728,
+        .read_header  = 0,
+        .write_header = 0,
+        .input        = NULL,
+        .output       = NULL,
+        .directory    = NULL
+    };
+
     argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
     if (arguments.verbose) {
