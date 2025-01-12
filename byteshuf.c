@@ -11,6 +11,46 @@
 
 const char *format = "tmp.byteshuf.partial.%d";
 
+
+FILE* wrapped_fopen(char *fname, char *fmode) {
+
+    FILE *file = fopen(fname, fmode);
+
+    if (file == NULL) {
+        printf("Failed to open file: %s, with mode %s\n", fname, fmode);
+        exit(EXIT_FAILURE);
+    }
+
+    return file;
+}
+
+void wrapped_fwrite(const void *ptr, size_t size, size_t count, FILE *file) {
+
+    size_t written = fwrite(ptr, size, count, file);
+
+    if (written != count) {
+        printf("Only wrote %d of %d elements\n", (int) written, (int) count);
+        exit(EXIT_FAILURE);
+    }
+}
+
+void wrapped_fclose(FILE *file) {
+
+    if (fclose(file) != 0) {
+        printf("Failed to close file\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void wrapped_fseek(FILE *file, long int offset, int whence) {
+
+    if (fseek(file, offset, whence) != 0) {
+        printf("Failed to fseek\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+
 typedef struct Data {
     uint8_t contents[BYTES_PER];
 } Data;
@@ -62,7 +102,7 @@ static FILE* open_file_in_directory(struct arguments *args, const char *fname) {
     if (args->verbose)
         printf("Opened %s\n", tempfile);
 
-    return fopen(tempfile, "rb");
+    return wrapped_fopen(tempfile, "rb");
 }
 
 static uint64_t rand64() {
@@ -88,9 +128,9 @@ static void shuffle_and_save(struct arguments *args, size_t count, Data *data, i
         swap_data(data, i, rand64() % count);
 
     if (count) {
-        FILE *fout = fopen(tempfile, "wb");
-        fwrite(data, sizeof(Data), count, fout);
-        fclose(fout);
+        FILE *fout = wrapped_fopen(tempfile, "wb");
+        wrapped_fwrite(data, sizeof(Data), count, fout);
+        wrapped_fclose(fout);
     }
 
     if (args->verbose)
@@ -142,10 +182,10 @@ static size_t read_all_input_files(struct arguments *args, int *nfiles) {
             FILE *fin = open_file_in_directory(args, dirent->d_name);
 
             if (args->read_header)
-                fseek(fin, args->read_header, SEEK_CUR);
+                wrapped_fseek(fin, args->read_header, SEEK_CUR);
 
             leftovers = process_input_file(args, fin, data, leftovers, nfiles);
-            fclose(fin);
+            wrapped_fclose(fin);
         }
 
         closedir(directory);
@@ -153,17 +193,19 @@ static size_t read_all_input_files(struct arguments *args, int *nfiles) {
 
     if (args->input != NULL) {
 
-        FILE *fin = fopen(args->input, "rb");
+        FILE *fin = wrapped_fopen(args->input, "rb");
 
         if (args->read_header)
-            fseek(fin, args->read_header, SEEK_CUR);
+            wrapped_fseek(fin, args->read_header, SEEK_CUR);
 
         leftovers = process_input_file(args, fin, data, leftovers, nfiles);
-        fclose(fin);
+        wrapped_fclose(fin);
     }
 
     if (leftovers)
         shuffle_and_save(args, leftovers, data, nfiles);
+
+    free(data);
 
     return leftovers;
 }
@@ -175,11 +217,11 @@ static FILE *open_output_file(struct arguments *args, int out_idx) {
     /// that was provided. Otherwise, open files appending .%d for the out_idx
 
     if (!args->per_file)
-        return fopen(args->output, "wb");
+        return wrapped_fopen(args->output, "wb");
 
     char fname[512];
     sprintf(fname, "%s.%d", args->output, out_idx);
-    return fopen(fname, "wb");
+    return wrapped_fopen(fname, "wb");
 }
 
 static void pop_and_save(FILE *fout, FILE **partials, size_t *remaining, size_t total_remaining) {
@@ -197,10 +239,10 @@ static void pop_and_save(FILE *fout, FILE **partials, size_t *remaining, size_t 
 
     if (fread(&data, sizeof(Data), 1, partials[input_idx]) != (size_t) 1)
         printf("Error trying to read files...\n");
-    fwrite(&data, sizeof(Data), 1, fout);
+    wrapped_fwrite(&data, sizeof(Data), 1, fout);
 
     if (!--remaining[input_idx])
-        fclose(partials[input_idx]);
+        wrapped_fclose(partials[input_idx]);
 }
 
 static void close_output_file(struct arguments *args, int out_idx, FILE *fout, size_t total, size_t saved) {
@@ -213,7 +255,7 @@ static void close_output_file(struct arguments *args, int out_idx, FILE *fout, s
     else if (args->verbose)
         printf("Finished writing to %s.%d (%zd of %zd)\n", args->output, out_idx, saved, total);
 
-    fclose(fout);
+    wrapped_fclose(fout);
 }
 
 static void output_from_partials(struct arguments *args, FILE **partials, size_t *remaining, int nfiles) {
@@ -236,7 +278,7 @@ static void output_from_partials(struct arguments *args, FILE **partials, size_t
         if (args->write_header) {
             uint8_t header[args->write_header];
             memset(header, 0, args->write_header);
-            fwrite(header, sizeof(uint8_t), args->write_header, fout);
+            wrapped_fwrite(header, sizeof(uint8_t), args->write_header, fout);
         }
 
         for (size_t i = 0; i < entries_per && total_entries != total_saved; i++, total_saved++)
@@ -288,11 +330,18 @@ int main(int argc, char *argv[]) {
         char tempfile[512];
         sprintf(tempfile, format, i);
 
-        partials[i]  = fopen(tempfile, "rb");
+        partials[i]  = wrapped_fopen(tempfile, "rb");
         remaining[i] = arguments.chunk_size;
     }
 
     if (leftovers) remaining[nfiles-1] = leftovers;
 
     output_from_partials(&arguments, partials, remaining, nfiles);
+
+    free(partials);
+    free(remaining);
+
+    free(arguments->input);
+    free(arguments->output);
+    free(arguments->directory);
 }
